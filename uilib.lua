@@ -4058,6 +4058,7 @@ function library:Init(Config)
 				local expandedHeight = baseHeight
 				local isOpen = false
 				local optionButtons = {}
+				local optionWidgets = {}
 				local setOpen
 
 				local row = createRow(baseHeight)
@@ -4145,17 +4146,49 @@ function library:Init(Config)
 				end
 
 				local function updateOptionVisual(optionName)
-					local optionButton = optionButtons[optionName]
-					if not optionButton then
+					local widgets = optionWidgets[optionName]
+					if not widgets then
 						return
 					end
+
+					local optionButton = widgets.Button
+					local optionLabel = widgets.Label
+					local indicator = widgets.Indicator
+					local indicatorStroke = widgets.IndicatorStroke
+					local checkFill = widgets.CheckFill
+
 					if isMulti then
 						local enabled = selectedMap[optionName] == true
-						optionButton.Text = (enabled and "  [x] " or "  [ ] ") .. optionName
-						optionButton.TextColor3 = enabled and library.acientColor or Color3.fromRGB(160, 160, 160)
+						TweenService:Create(optionButton, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							BackgroundTransparency = enabled and 0.92 or 1,
+						}):Play()
+						TweenService:Create(optionLabel, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							TextColor3 = enabled and library.acientColor or Color3.fromRGB(165, 165, 165),
+						}):Play()
+						if indicator then
+							TweenService:Create(indicator, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+								BackgroundTransparency = enabled and 0.7 or 1,
+							}):Play()
+						end
+						if indicatorStroke then
+							TweenService:Create(indicatorStroke, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+								Transparency = enabled and 0.12 or 0.45,
+							}):Play()
+						end
+						if checkFill then
+							TweenService:Create(checkFill, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+								Size = enabled and UDim2.new(0, 8, 0, 8) or UDim2.new(0, 0, 0, 0),
+								BackgroundTransparency = enabled and 0 or 1,
+							}):Play()
+						end
 					else
-						optionButton.Text = "  " .. optionName
-						optionButton.TextColor3 = (selected == optionName) and library.acientColor or Color3.fromRGB(160, 160, 160)
+						local enabled = (selected == optionName)
+						TweenService:Create(optionButton, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							BackgroundTransparency = enabled and 0.94 or 1,
+						}):Play()
+						TweenService:Create(optionLabel, TweenInfo.new(0.08, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							TextColor3 = enabled and library.acientColor or Color3.fromRGB(165, 165, 165),
+						}):Play()
 					end
 				end
 
@@ -4199,19 +4232,61 @@ function library:Init(Config)
 
 					local optionButton = Instance.new("TextButton")
 					optionButton.Parent = optionsFrame
+					optionButton.BackgroundColor3 = library.darkGray
 					optionButton.BackgroundTransparency = 1
 					optionButton.Size = UDim2.new(1, 0, 0, optionHeight)
 					optionButton.AutoButtonColor = false
-					optionButton.Font = library.Font
-					optionButton.TextSize = 13
-					optionButton.TextXAlignment = Enum.TextXAlignment.Left
-					optionButton.TextColor3 = Color3.fromRGB(160, 160, 160)
+					optionButton.Text = ""
+					optionButton.BorderSizePixel = 0
+					Instance.new("UICorner", optionButton).CornerRadius = UDim.new(0, 2)
+
+					local optionLabel = Instance.new("TextLabel")
+					optionLabel.Parent = optionButton
+					optionLabel.BackgroundTransparency = 1
+					optionLabel.Position = UDim2.new(0, 8, 0, 0)
+					optionLabel.Size = UDim2.new(1, isMulti and -30 or -10, 1, 0)
+					optionLabel.Font = library.Font
+					optionLabel.Text = normalized
+					optionLabel.TextSize = 13
+					optionLabel.TextXAlignment = Enum.TextXAlignment.Left
+					optionLabel.TextColor3 = Color3.fromRGB(165, 165, 165)
+
+					local indicator = nil
+					local indicatorStroke = nil
+					local checkFill = nil
+					if isMulti then
+						indicator = Instance.new("Frame")
+						indicator.Parent = optionButton
+						indicator.AnchorPoint = Vector2.new(1, 0.5)
+						indicator.Position = UDim2.new(1, -8, 0.5, 0)
+						indicator.Size = UDim2.new(0, 12, 0, 12)
+						indicator.BackgroundColor3 = library.darkGray
+						indicator.BackgroundTransparency = 1
+						indicator.BorderSizePixel = 0
+						Instance.new("UICorner", indicator).CornerRadius = UDim.new(0, 2)
+						indicatorStroke = Instance.new("UIStroke", indicator)
+						indicatorStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+						indicatorStroke.Thickness = 1
+						indicatorStroke.Color = library.lightGray
+						indicatorStroke.Transparency = 0.45
+
+						checkFill = Instance.new("Frame")
+						checkFill.Parent = indicator
+						checkFill.AnchorPoint = Vector2.new(0.5, 0.5)
+						checkFill.Position = UDim2.new(0.5, 0, 0.5, 0)
+						checkFill.Size = UDim2.new(0, 0, 0, 0)
+						checkFill.BackgroundColor3 = library.acientColor
+						checkFill.BackgroundTransparency = 1
+						checkFill.BorderSizePixel = 0
+						Instance.new("UICorner", checkFill).CornerRadius = UDim.new(0, 2)
+					end
+
 					optionButton.MouseEnter:Connect(function()
-						if isMulti and selectedMap[normalized] then
-							return
-						end
 						TweenService:Create(optionButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-							TextColor3 = Color3.fromRGB(190, 190, 190),
+							BackgroundTransparency = 0.96,
+						}):Play()
+						TweenService:Create(optionLabel, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							TextColor3 = Color3.fromRGB(195, 195, 195),
 						}):Play()
 					end)
 					optionButton.MouseLeave:Connect(function()
@@ -4231,6 +4306,13 @@ function library:Init(Config)
 						end
 					end)
 					optionButtons[normalized] = optionButton
+					optionWidgets[normalized] = {
+						Button = optionButton,
+						Label = optionLabel,
+						Indicator = indicator,
+						IndicatorStroke = indicatorStroke,
+						CheckFill = checkFill,
+					}
 					updateOptionVisual(normalized)
 					recalcHeights()
 					return true
@@ -4304,6 +4386,7 @@ function library:Init(Config)
 						end
 					end
 					optionButtons = {}
+					optionWidgets = {}
 					values = {}
 					for _, entry in ipairs(type(newValues) == "table" and newValues or {}) do
 						addOptionButton(entry)
