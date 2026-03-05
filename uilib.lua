@@ -2953,11 +2953,13 @@ function library:Init(Config)
 			suffix = suffix or ""
 			compare = compare or false
 			compareSign = compareSign or "/"
+			local rawStep = type(values) == "table" and values.step or nil
 			values = values or {}
 			values = {
 				min = values.min or 0,
 				max = values.max or 100,
 				default = values.default or 0,
+				step = rawStep,
 			}
 			callback = callback or function() end
 			local controlKey = "slider::" .. tostring(text):lower():gsub("%s+", "_")
@@ -2967,6 +2969,37 @@ function library:Init(Config)
 			end
 
 			values.max = values.max + 1
+			local sliderMin = tonumber(values.min) or 0
+			local sliderMax = tonumber(values.max - 1) or 100
+			local stepValue = math.abs(tonumber(values.step) or 1)
+			if stepValue <= 0 then
+				stepValue = 1
+			end
+			local stepText = tostring(stepValue)
+			local dotIndex = stepText:find("%.")
+			local decimals = 0
+			if dotIndex then
+				decimals = math.min(4, #stepText - dotIndex)
+			end
+			local function quantize(raw)
+				local numeric = math.clamp(tonumber(raw) or sliderMin, sliderMin, sliderMax)
+				local snapped = sliderMin + (math.floor(((numeric - sliderMin) / stepValue) + 0.5) * stepValue)
+				snapped = math.clamp(snapped, sliderMin, sliderMax)
+				if decimals > 0 then
+					local power = 10 ^ decimals
+					snapped = math.floor((snapped * power) + 0.5) / power
+				else
+					snapped = math.floor(snapped + 0.5)
+				end
+				return snapped
+			end
+			local function formatNumber(raw)
+				local numeric = tonumber(raw) or 0
+				if decimals > 0 then
+					return string.format("%." .. decimals .. "f", numeric)
+				end
+				return tostring(math.floor(numeric + 0.5))
+			end
 
 			local sliderFrame = Instance.new("Frame")
 			local sliderFolder = Instance.new("Folder")
@@ -3095,15 +3128,15 @@ function library:Init(Config)
 
 			TweenWrapper:CreateStyle("slider_drag", 0.05, Enum.EasingStyle.Linear)
 
-			local ValueNum = values.default
-			local slideText = compare and ValueNum .. compareSign .. tostring(values.max - 1) .. suffix or ValueNum .. suffix
+			local ValueNum = quantize(values.default)
+			local slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 			sliderValue.Text = slideText
 			local function UpdateSlider()
 				TweenService:Create(sliderIndicator, TweenWrapper.Styles["slider_drag"], {Size = UDim2.new(0, math.clamp(Mouse.X - sliderIndicator.AbsolutePosition.X, 0, sliderBackground.AbsoluteSize.X), 0, 12)}):Play()
 
-				ValueNum = math.floor((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min)) or 0.00
+				ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
 
-				local slideText = compare and ValueNum .. compareSign .. tostring(values.max - 1) .. suffix or ValueNum .. suffix
+				local slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 
 				sliderValue.Text = slideText
 
@@ -3114,9 +3147,9 @@ function library:Init(Config)
 				sliderValue.Text = slideText
 
 				moveconnection = Mouse.Move:Connect(function()
-					ValueNum = math.floor((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
+					ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
 
-					slideText = compare and ValueNum .. compareSign .. tostring(values.max - 1) .. suffix or ValueNum .. suffix
+					slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 					sliderValue.Text = slideText
 
 					pcall(function()
@@ -3131,9 +3164,9 @@ function library:Init(Config)
 
 				releaseconnection = UserInputService.InputEnded:Connect(function(Mouse_2)
 					if Mouse_2.UserInputType == Enum.UserInputType.MouseButton1 then
-						ValueNum = math.floor((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
+						ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
 
-						slideText = compare and ValueNum .. compareSign .. tostring(values.max - 1) .. suffix or ValueNum .. suffix
+						slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 						sliderValue.Text = slideText
 
 						pcall(function()
@@ -3160,12 +3193,14 @@ function library:Init(Config)
 			OptionStates[sliderButton] = {values.default, SliderFunctions}
 
 			function SliderFunctions:Set(new, NoCallBack)
+				new = quantize(new)
 				local ncalc1 = new - values.min
 				local ncalc2 = ncalc1 / calc1
 				local ncalc3 = ncalc2 * sliderBackground.AbsoluteSize.X
 				local nCalculation = ncalc3
 				sliderIndicator.Size = UDim2.new(0, nCalculation, 0, 12)
-				slideText = compare and new .. compareSign .. tostring(values.max - 1) .. suffix or new .. suffix
+				slideText = compare and formatNumber(new) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(new) .. suffix
+				ValueNum = new
 				sliderValue.Text = slideText
 				if not NoCallBack then
 					callback(new)
@@ -3180,14 +3215,16 @@ function library:Init(Config)
 			function SliderFunctions:Max(new)
 				new = new or values.max
 				values.max = new + 1
-				slideText = compare and ValueNum .. compareSign .. tostring(values.max - 1) .. suffix or ValueNum .. suffix
+				sliderMax = tonumber(new) or sliderMax
+				slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 				return self
 			end
 
 			function SliderFunctions:Min(new)
 				new = new or values.min
 				values.min = new
-				slideText = compare and new .. compareSign .. tostring(values.max - 1) .. suffix or ValueNum .. suffix
+				sliderMin = tonumber(new) or sliderMin
+				slideText = compare and formatNumber(new) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 				TweenService:Create(sliderIndicator, TweenWrapper.Styles["slider_drag"], {Size = UDim2.new(0, math.clamp(Mouse.X - sliderIndicator.AbsolutePosition.X, 0, sliderBackground.AbsoluteSize.X), 0, 12)}):Play()
 				return self
 			end
@@ -3807,16 +3844,44 @@ function library:Init(Config)
 				return ToggleFunctions
 			end
 
-			function Section:AddSlider(textValue, minValue, maxValue, defaultValue, callback)
+			function Section:AddSlider(textValue, minValue, maxValue, defaultValue, callback, stepValue)
 				local minV = tonumber(minValue) or 0
 				local maxV = tonumber(maxValue) or 100
 				if maxV < minV then
 					minV, maxV = maxV, minV
 				end
+				local stepV = math.abs(tonumber(stepValue) or 1)
+				if stepV <= 0 then
+					stepV = 1
+				end
+				local stepText = tostring(stepV)
+				local dotIndex = stepText:find("%.")
+				local decimalPlaces = 0
+				if dotIndex then
+					decimalPlaces = math.min(4, #stepText - dotIndex)
+				end
 				local key = "slider::" .. groupKey .. "::" .. tostring(textValue or "slider"):lower():gsub("%s+", "_")
 				local loadedValue = library.LoadedConfig and library.LoadedConfig[key]
-				local value = tonumber(loadedValue) or tonumber(defaultValue) or minV
-				value = math.clamp(value, minV, maxV)
+				local function snapValue(raw)
+					local numeric = math.clamp(tonumber(raw) or minV, minV, maxV)
+					local snapped = minV + (math.floor(((numeric - minV) / stepV) + 0.5) * stepV)
+					snapped = math.clamp(snapped, minV, maxV)
+					if decimalPlaces > 0 then
+						local power = 10 ^ decimalPlaces
+						snapped = math.floor((snapped * power) + 0.5) / power
+					else
+						snapped = math.floor(snapped + 0.5)
+					end
+					return snapped
+				end
+				local function formatValue(raw)
+					local numeric = tonumber(raw) or 0
+					if decimalPlaces > 0 then
+						return string.format("%." .. decimalPlaces .. "f", numeric)
+					end
+					return tostring(math.floor(numeric + 0.5))
+				end
+				local value = snapValue(tonumber(loadedValue) or tonumber(defaultValue) or minV)
 
 				local row = createRow(38)
 				local label = Instance.new("TextLabel")
@@ -3867,7 +3932,7 @@ function library:Init(Config)
 					TweenService:Create(fill, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 						Size = UDim2.new(math.clamp(scale, 0, 1), 0, 1, 0),
 					}):Play()
-					valueLabel.Text = tostring(math.floor(value))
+					valueLabel.Text = formatValue(value)
 				end
 
 				local SliderFunctions = {}
@@ -3875,7 +3940,7 @@ function library:Init(Config)
 					return value
 				end
 				function SliderFunctions:Set(newValue)
-					value = math.clamp(tonumber(newValue) or minV, minV, maxV)
+					value = snapValue(newValue)
 					render()
 					if type(callback) == "function" then
 						callback(value)
@@ -3909,22 +3974,82 @@ function library:Init(Config)
 				return SliderFunctions
 			end
 
-			function Section:AddDropdown(textValue, arg2, arg3, arg4)
+			function Section:AddDropdown(textValue, arg2, arg3, arg4, arg5)
 				local values = {}
-				local selected = nil
 				local callback = nil
+				local isMulti = false
+				local selected = "None"
+				local selectedMap = {}
 
-				-- Supports both:
-				-- AddDropdown(text, list, default, callback)
-				-- AddDropdown(text, default, list, callback)
-				if type(arg2) == "table" then
+				local function normalizeValue(raw)
+					return tostring(raw or ""):gsub("^%s+", ""):gsub("%s+$", "")
+				end
+
+				local function copySelectionMap(map)
+					local out = {}
+					for key, state in pairs(map or {}) do
+						if state then
+							out[tostring(key)] = true
+						end
+					end
+					return out
+				end
+
+				local function normalizeSelectionMap(raw)
+					local out = {}
+					if type(raw) == "string" then
+						local normalized = normalizeValue(raw)
+						if normalized ~= "" then
+							out[normalized] = true
+						end
+					elseif type(raw) == "table" then
+						for key, entry in pairs(raw) do
+							if type(key) == "number" then
+								local normalized = normalizeValue(entry)
+								if normalized ~= "" then
+									out[normalized] = true
+								end
+							elseif entry then
+								local normalized = normalizeValue(key)
+								if normalized ~= "" then
+									out[normalized] = true
+								end
+							end
+						end
+					end
+					return out
+				end
+
+				if type(arg2) == "table" and (arg2.Values ~= nil or arg2.values ~= nil or arg2.Multi ~= nil or arg2.Callback ~= nil or arg2.Default ~= nil) then
+					local spec = arg2
+					values = type(spec.Values) == "table" and spec.Values or (type(spec.values) == "table" and spec.values or {})
+					callback = type(spec.Callback) == "function" and spec.Callback or (type(arg3) == "function" and arg3 or nil)
+					isMulti = spec.Multi == true
+					if isMulti then
+						selectedMap = normalizeSelectionMap(spec.Default)
+					else
+						selected = normalizeValue(spec.Default or values[1] or "None")
+					end
+				elseif type(arg2) == "table" then
 					values = arg2
-					selected = tostring(arg3 or values[1] or "None")
 					callback = arg4
+					local options = type(arg5) == "table" and arg5 or {}
+					isMulti = options.Multi == true
+					if isMulti then
+						selectedMap = normalizeSelectionMap(arg3)
+					else
+						selected = normalizeValue(arg3 or values[1] or "None")
+					end
 				else
 					values = type(arg3) == "table" and arg3 or {}
-					selected = tostring(arg2 or values[1] or "None")
 					callback = arg4
+					local options = type(arg5) == "table" and arg5 or {}
+					isMulti = options.Multi == true
+					if isMulti then
+						selectedMap = normalizeSelectionMap(arg2)
+					else
+						selected = normalizeValue(arg2 or values[1] or "None")
+					end
 				end
 
 				local optionHeight = 20
@@ -3982,8 +4107,14 @@ function library:Init(Config)
 				optionsLayout.Parent = optionsFrame
 				optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-				local function normalizeValue(raw)
-					return tostring(raw or ""):gsub("^%s+", ""):gsub("%s+$", "")
+				local function getSelectedNamesInOrder()
+					local out = {}
+					for _, optionName in ipairs(values) do
+						if selectedMap[optionName] then
+							table.insert(out, optionName)
+						end
+					end
+					return out
 				end
 
 				local function recalcHeights()
@@ -3997,14 +4128,65 @@ function library:Init(Config)
 				end
 
 				local function setText()
-					valueLabel.Text = tostring(textValue or "Dropdown") .. ": " .. tostring(selected or "None")
+					if isMulti then
+						local selectedNames = getSelectedNamesInOrder()
+						local summary = "None"
+						if #selectedNames == 1 then
+							summary = selectedNames[1]
+						elseif #selectedNames == 2 then
+							summary = selectedNames[1] .. ", " .. selectedNames[2]
+						elseif #selectedNames > 2 then
+							summary = tostring(#selectedNames) .. " selected"
+						end
+						valueLabel.Text = tostring(textValue or "Dropdown") .. ": " .. summary
+					else
+						valueLabel.Text = tostring(textValue or "Dropdown") .. ": " .. tostring(selected or "None")
+					end
+				end
+
+				local function updateOptionVisual(optionName)
+					local optionButton = optionButtons[optionName]
+					if not optionButton then
+						return
+					end
+					if isMulti then
+						local enabled = selectedMap[optionName] == true
+						optionButton.Text = (enabled and "  [x] " or "  [ ] ") .. optionName
+						optionButton.TextColor3 = enabled and library.acientColor or Color3.fromRGB(160, 160, 160)
+					else
+						optionButton.Text = "  " .. optionName
+						optionButton.TextColor3 = (selected == optionName) and library.acientColor or Color3.fromRGB(160, 160, 160)
+					end
+				end
+
+				local function refreshAllOptionVisuals()
+					for optionName in pairs(optionButtons) do
+						updateOptionVisual(optionName)
+					end
 				end
 
 				local function applySelection(newValue)
 					selected = normalizeValue(newValue or selected or "None")
+					refreshAllOptionVisuals()
 					setText()
 					if type(callback) == "function" then
 						callback(selected)
+					end
+				end
+
+				local function applyMultiSelection(newValue, fireCallback)
+					local desired = normalizeSelectionMap(newValue)
+					local sanitized = {}
+					for _, optionName in ipairs(values) do
+						if desired[optionName] then
+							sanitized[optionName] = true
+						end
+					end
+					selectedMap = sanitized
+					refreshAllOptionVisuals()
+					setText()
+					if fireCallback and type(callback) == "function" then
+						callback(copySelectionMap(selectedMap))
 					end
 				end
 
@@ -4021,25 +4203,35 @@ function library:Init(Config)
 					optionButton.Size = UDim2.new(1, 0, 0, optionHeight)
 					optionButton.AutoButtonColor = false
 					optionButton.Font = library.Font
-					optionButton.Text = "  " .. normalized
 					optionButton.TextSize = 13
 					optionButton.TextXAlignment = Enum.TextXAlignment.Left
 					optionButton.TextColor3 = Color3.fromRGB(160, 160, 160)
 					optionButton.MouseEnter:Connect(function()
+						if isMulti and selectedMap[normalized] then
+							return
+						end
 						TweenService:Create(optionButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 							TextColor3 = Color3.fromRGB(190, 190, 190),
 						}):Play()
 					end)
 					optionButton.MouseLeave:Connect(function()
-						TweenService:Create(optionButton, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-							TextColor3 = Color3.fromRGB(160, 160, 160),
-						}):Play()
+						updateOptionVisual(normalized)
 					end)
 					optionButton.Activated:Connect(function()
-						applySelection(normalized)
-						setOpen(false)
+						if isMulti then
+							selectedMap[normalized] = not selectedMap[normalized] and true or nil
+							refreshAllOptionVisuals()
+							setText()
+							if type(callback) == "function" then
+								callback(copySelectionMap(selectedMap))
+							end
+						else
+							applySelection(normalized)
+							setOpen(false)
+						end
 					end)
 					optionButtons[normalized] = optionButton
+					updateOptionVisual(normalized)
 					recalcHeights()
 					return true
 				end
@@ -4069,16 +4261,28 @@ function library:Init(Config)
 					addOptionButton(entry)
 				end
 
-				if not optionButtons[selected] and #values > 0 then
-					selected = values[1]
+				if isMulti then
+					applyMultiSelection(selectedMap, false)
+				else
+					if not optionButtons[selected] and #values > 0 then
+						selected = values[1]
+					end
+					setText()
+					refreshAllOptionVisuals()
 				end
-				setText()
 
 				local DropdownFunctions = {}
 				function DropdownFunctions:GetValue()
+					if isMulti then
+						return copySelectionMap(selectedMap)
+					end
 					return selected
 				end
 				function DropdownFunctions:Set(newValue)
+					if isMulti then
+						applyMultiSelection(newValue, true)
+						return self
+					end
 					local normalized = normalizeValue(newValue)
 					if normalized == "" then
 						return self
@@ -4104,10 +4308,15 @@ function library:Init(Config)
 					for _, entry in ipairs(type(newValues) == "table" and newValues or {}) do
 						addOptionButton(entry)
 					end
-					if not optionButtons[selected] then
-						selected = values[1] or "None"
+					if isMulti then
+						applyMultiSelection(selectedMap, false)
+					else
+						if not optionButtons[selected] then
+							selected = values[1] or "None"
+						end
+						setText()
+						refreshAllOptionVisuals()
 					end
-					setText()
 					recalcHeights()
 					return self
 				end
