@@ -182,6 +182,32 @@ local function EnableDrag(obj, latency)
 	end)
 end
 
+local function FindFirstChildInsensitive(parent, childName)
+	if typeof(parent) ~= "Instance" then
+		return nil
+	end
+	if type(childName) ~= "string" then
+		return nil
+	end
+	local trimmed = childName:gsub("^%s+", ""):gsub("%s+$", "")
+	if trimmed == "" then
+		return nil
+	end
+
+	local direct = parent:FindFirstChild(trimmed)
+	if direct then
+		return direct
+	end
+
+	local lowered = string.lower(trimmed)
+	for _, child in ipairs(parent:GetChildren()) do
+		if string.lower(child.Name) == lowered then
+			return child
+		end
+	end
+	return nil
+end
+
 RunService.RenderStepped:Connect(function(v)
 	library.fps =  math.round(1/v)
 end)
@@ -1523,6 +1549,563 @@ function library:Init(Config)
 		HeaderLabel = headerLabel,
 		PanicButton = panic,
 	}
+
+	local targetHudSessions = {}
+
+	local function trimString(value)
+		return tostring(value or ""):gsub("^%s+", ""):gsub("%s+$", "")
+	end
+
+	local function findPlayerByNameInsensitive(playerName)
+		local wanted = string.lower(trimString(playerName))
+		if wanted == "" then
+			return nil
+		end
+		for _, plr in ipairs(Services.Players:GetPlayers()) do
+			if string.lower(plr.Name) == wanted or string.lower(plr.DisplayName) == wanted then
+				return plr
+			end
+		end
+		return nil
+	end
+
+	local function resolveInstancePath(pathText)
+		local trimmed = trimString(pathText)
+		if trimmed == "" then
+			return nil
+		end
+
+		local parts = {}
+		for token in string.gmatch(trimmed, "[^%.]+") do
+			table.insert(parts, token)
+		end
+		if #parts <= 0 then
+			return nil
+		end
+
+		local current = nil
+		local first = string.lower(parts[1])
+		if first == "game" then
+			current = game
+			table.remove(parts, 1)
+		elseif first == "workspace" then
+			current = Workspace
+			table.remove(parts, 1)
+		elseif first == "players" then
+			current = Services.Players
+			table.remove(parts, 1)
+		elseif first == "replicatedstorage" then
+			current = Services.ReplicatedStorage
+			table.remove(parts, 1)
+		elseif first == "lighting" then
+			current = Services.Lighting
+			table.remove(parts, 1)
+		else
+			current = Workspace
+		end
+
+		for _, segment in ipairs(parts) do
+			if current == game then
+				local okService, serviceInst = pcall(function()
+					return game:GetService(segment)
+				end)
+				if okService and serviceInst then
+					current = serviceInst
+				else
+					current = FindFirstChildInsensitive(current, segment)
+				end
+			else
+				current = FindFirstChildInsensitive(current, segment)
+			end
+			if not current then
+				return nil
+			end
+		end
+		return current
+	end
+
+	local function getHumanoidFromModel(model)
+		if not model or not model.Parent then
+			return nil
+		end
+		local humanoid = model:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			return humanoid
+		end
+		local deepHumanoid = model:FindFirstChild("Humanoid", true)
+		if deepHumanoid and deepHumanoid:IsA("Humanoid") then
+			return deepHumanoid
+		end
+		return nil
+	end
+
+	local function getHeadPartFromModel(model)
+		if not model or not model.Parent then
+			return nil
+		end
+		local head = model:FindFirstChild("Head") or model:FindFirstChild("Head", true)
+		if head and head:IsA("BasePart") then
+			return head
+		end
+		local hrp = model:FindFirstChild("HumanoidRootPart") or model:FindFirstChild("HumanoidRootPart", true)
+		if hrp and hrp:IsA("BasePart") then
+			return hrp
+		end
+		return model:FindFirstChildWhichIsA("BasePart", true)
+	end
+
+	local function resolveModelFromInstance(inst)
+		if not inst then
+			return nil, nil
+		end
+		if inst:IsA("Player") then
+			return inst.Character, inst
+		end
+		if inst:IsA("Model") then
+			return inst, nil
+		end
+		if inst:IsA("Humanoid") then
+			return inst.Parent, nil
+		end
+		if inst:IsA("BasePart") then
+			return inst:FindFirstAncestorOfClass("Model") or inst.Parent, nil
+		end
+		local asModel = inst:FindFirstAncestorOfClass("Model")
+		if asModel then
+			return asModel, nil
+		end
+		return nil, nil
+	end
+
+	function library:TargetHUD(config)
+		config = type(config) == "table" and config or {}
+		local titleText = tostring(config.Title or config.title or "Target HUD")
+		local parentRef = config.Parent
+		if typeof(parentRef) ~= "Instance" or (not parentRef:IsA("LayerCollector")) then
+			parentRef = screen
+		end
+
+		local sizeValue = (typeof(config.Size) == "UDim2" and config.Size) or UDim2.fromOffset(320, 146)
+		local positionValue = (typeof(config.Position) == "UDim2" and config.Position)
+			or UDim2.new(0.5, -(sizeValue.X.Offset // 2), 0.72, 0)
+		local targetPlayerName = tostring(config.PlayerName or config.Player or config.player or "")
+		local targetNpcPath = tostring(config.NPCPath or config.Path or config.NpcPath or config.path or "")
+
+		local hudGui = Instance.new("ScreenGui")
+		hudGui.Name = "TargetHUD"
+		hudGui.ResetOnSpawn = false
+		hudGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		hudGui.Parent = parentRef
+
+		local root = Instance.new("Frame")
+		root.Name = "TargetHUDRoot"
+		root.Parent = hudGui
+		root.Active = true
+		root.BackgroundColor3 = library.darkGray
+		root.BackgroundTransparency = 0.06
+		root.BorderSizePixel = 0
+		root.Position = positionValue
+		root.Size = sizeValue
+		root.ClipsDescendants = true
+		Instance.new("UICorner", root).CornerRadius = UDim.new(0, 3)
+		local rootStroke = Instance.new("UIStroke", root)
+		rootStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		rootStroke.Thickness = 1
+		rootStroke.Color = library.lightGray
+		rootStroke.Transparency = 0.35
+		EnableDrag(root, 0.08)
+
+		local title = Instance.new("TextLabel")
+		title.Parent = root
+		title.BackgroundTransparency = 1
+		title.Position = UDim2.new(0, 8, 0, 4)
+		title.Size = UDim2.new(1, -34, 0, 18)
+		title.Font = library.Font
+		title.TextSize = 13
+		title.TextXAlignment = Enum.TextXAlignment.Left
+		title.TextColor3 = Color3.fromRGB(205, 205, 205)
+		title.Text = titleText
+
+		local closeButton = Instance.new("TextButton")
+		closeButton.Parent = root
+		closeButton.AnchorPoint = Vector2.new(1, 0)
+		closeButton.Position = UDim2.new(1, -6, 0, 4)
+		closeButton.Size = UDim2.new(0, 20, 0, 18)
+		closeButton.BackgroundColor3 = library.darkGray
+		closeButton.BackgroundTransparency = 1
+		closeButton.BorderSizePixel = 0
+		closeButton.Font = library.Font
+		closeButton.Text = "x"
+		closeButton.TextSize = 12
+		closeButton.TextColor3 = Color3.fromRGB(200, 200, 200)
+		closeButton.AutoButtonColor = false
+
+		local viewport = Instance.new("ViewportFrame")
+		viewport.Parent = root
+		viewport.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+		viewport.BorderSizePixel = 0
+		viewport.Position = UDim2.new(0, 8, 0, 28)
+		viewport.Size = UDim2.new(0, 90, 0, 108)
+		viewport.Ambient = Color3.fromRGB(180, 180, 180)
+		viewport.LightColor = Color3.fromRGB(255, 255, 255)
+		viewport.LightDirection = Vector3.new(-1, -1, -1)
+		Instance.new("UICorner", viewport).CornerRadius = UDim.new(0, 2)
+		local viewportWorld = Instance.new("WorldModel")
+		viewportWorld.Parent = viewport
+		local viewportCamera = Instance.new("Camera")
+		viewportCamera.Parent = viewport
+		viewport.CurrentCamera = viewportCamera
+
+		local hpBarBg = Instance.new("Frame")
+		hpBarBg.Parent = root
+		hpBarBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+		hpBarBg.BorderSizePixel = 0
+		hpBarBg.Position = UDim2.new(0, 102, 0, 28)
+		hpBarBg.Size = UDim2.new(0, 8, 0, 108)
+		Instance.new("UICorner", hpBarBg).CornerRadius = UDim.new(0, 2)
+
+		local hpFill = Instance.new("Frame")
+		hpFill.Parent = hpBarBg
+		hpFill.AnchorPoint = Vector2.new(0, 1)
+		hpFill.Position = UDim2.new(0, 0, 1, 0)
+		hpFill.Size = UDim2.new(1, 0, 0, 0)
+		hpFill.BackgroundColor3 = Color3.fromRGB(255, 74, 74)
+		hpFill.BorderSizePixel = 0
+		Instance.new("UICorner", hpFill).CornerRadius = UDim.new(0, 2)
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Parent = root
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Position = UDim2.new(0, 116, 0, 36)
+		nameLabel.Size = UDim2.new(1, -124, 0, 22)
+		nameLabel.Font = library.Font
+		nameLabel.TextSize = 15
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		nameLabel.TextColor3 = Color3.fromRGB(225, 225, 225)
+		nameLabel.Text = "No target"
+		nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local hpLabel = Instance.new("TextLabel")
+		hpLabel.Parent = root
+		hpLabel.BackgroundTransparency = 1
+		hpLabel.Position = UDim2.new(0, 116, 0, 62)
+		hpLabel.Size = UDim2.new(1, -124, 0, 18)
+		hpLabel.Font = library.Font
+		hpLabel.TextSize = 13
+		hpLabel.TextXAlignment = Enum.TextXAlignment.Left
+		hpLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+		hpLabel.Text = "HP: -- / --"
+		hpLabel.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local statusLabel = Instance.new("TextLabel")
+		statusLabel.Parent = root
+		statusLabel.BackgroundTransparency = 1
+		statusLabel.Position = UDim2.new(0, 116, 0, 82)
+		statusLabel.Size = UDim2.new(1, -124, 0, 50)
+		statusLabel.Font = library.Font
+		statusLabel.TextSize = 12
+		statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+		statusLabel.TextYAlignment = Enum.TextYAlignment.Top
+		statusLabel.TextColor3 = Color3.fromRGB(155, 155, 155)
+		statusLabel.Text = ""
+		statusLabel.TextWrapped = true
+		statusLabel.Visible = false
+
+		local currentModel = nil
+		local currentHumanoid = nil
+		local currentPlayer = nil
+		local previewModelSource = nil
+		local resolveSignature = ""
+		local resolvePollAt = 0
+		local updateConnection = nil
+		local destroyed = false
+
+		local function clearViewport()
+			for _, inst in ipairs(viewportWorld:GetChildren()) do
+				inst:Destroy()
+			end
+			previewModelSource = nil
+		end
+
+		local function applyModelPreview(modelSource)
+			if previewModelSource == modelSource then
+				return
+			end
+			clearViewport()
+			if not (modelSource and modelSource.Parent and modelSource:IsA("Model")) then
+				return
+			end
+
+			local clone = nil
+			local oldArchivable = modelSource.Archivable
+			local okClone = pcall(function()
+				if modelSource.Archivable == false then
+					modelSource.Archivable = true
+				end
+				clone = modelSource:Clone()
+			end)
+			pcall(function()
+				modelSource.Archivable = oldArchivable
+			end)
+
+			if (not okClone) or (not clone) or (not clone:IsA("Model")) then
+				if clone and clone.Parent then
+					clone:Destroy()
+				end
+				return
+			end
+
+			for _, inst in ipairs(clone:GetDescendants()) do
+				if inst:IsA("Script") or inst:IsA("LocalScript") or inst:IsA("ModuleScript") then
+					inst:Destroy()
+				elseif inst:IsA("BasePart") then
+					inst.Anchored = true
+					inst.CanCollide = false
+					inst.CastShadow = false
+				end
+			end
+
+			clone.Parent = viewportWorld
+			previewModelSource = modelSource
+
+			local okPivot, pivot = pcall(function()
+				return clone:GetPivot()
+			end)
+			if okPivot and typeof(pivot) == "CFrame" then
+				local pivotPosition = pivot.Position
+				local rootPart = clone:FindFirstChild("HumanoidRootPart", true)
+				if not (rootPart and rootPart:IsA("BasePart")) then
+					rootPart = clone.PrimaryPart
+				end
+
+				local alignYaw = CFrame.new()
+				if rootPart and rootPart:IsA("BasePart") then
+					local look = rootPart.CFrame.LookVector
+					local flatLook = Vector3.new(look.X, 0, look.Z)
+					if flatLook.Magnitude > 0.001 then
+						alignYaw = CFrame.lookAt(Vector3.zero, flatLook.Unit)
+					end
+				end
+
+				for _, inst in ipairs(clone:GetDescendants()) do
+					if inst:IsA("BasePart") then
+						local shifted = inst.CFrame - pivotPosition
+						inst.CFrame = alignYaw:Inverse() * shifted
+					end
+				end
+			end
+
+			local boundCF = CFrame.new()
+			local boundSize = Vector3.new(4, 6, 4)
+			local okBounds, resolvedCF, resolvedSize = pcall(function()
+				return clone:GetBoundingBox()
+			end)
+			if okBounds and typeof(resolvedCF) == "CFrame" and typeof(resolvedSize) == "Vector3" then
+				boundCF = resolvedCF
+				boundSize = resolvedSize
+			end
+
+			local maxDimension = math.max(boundSize.X, boundSize.Y, boundSize.Z)
+			local focus = boundCF.Position + Vector3.new(0, math.clamp(boundSize.Y * 0.1, 0.5, 3), 0)
+			local distance = math.clamp(maxDimension * 1.85, 6, 24) * 0.45
+			local cameraHeight = math.clamp(boundSize.Y * 0.18, 0.8, 4.2)
+			local frontDirection = Vector3.new(0, 0, 1)
+			local previewRoot = clone:FindFirstChild("HumanoidRootPart", true)
+			if not (previewRoot and previewRoot:IsA("BasePart")) then
+				previewRoot = clone.PrimaryPart
+			end
+			if previewRoot and previewRoot:IsA("BasePart") then
+				local look = previewRoot.CFrame.LookVector
+				local flatLook = Vector3.new(look.X, 0, look.Z)
+				if flatLook.Magnitude > 0.001 then
+					frontDirection = flatLook.Unit
+				end
+			end
+			viewportCamera.CFrame = CFrame.new(
+				focus + Vector3.new(0, cameraHeight, 0) + (frontDirection * distance),
+				focus
+			)
+		end
+
+		local function updateHealthView()
+			if not (currentHumanoid and currentHumanoid.Parent) then
+				hpFill.Size = UDim2.new(1, 0, 0, 0)
+				hpFill.BackgroundColor3 = Color3.fromRGB(255, 74, 74)
+				hpLabel.Text = "HP: -- / --"
+				return
+			end
+			local maxHealth = math.max(tonumber(currentHumanoid.MaxHealth) or 0, 1)
+			local health = math.clamp(tonumber(currentHumanoid.Health) or 0, 0, maxHealth)
+			local ratio = health / maxHealth
+			hpFill.Size = UDim2.new(1, 0, ratio, 0)
+			if ratio > 0.65 then
+				hpFill.BackgroundColor3 = Color3.fromRGB(90, 220, 110)
+			elseif ratio > 0.35 then
+				hpFill.BackgroundColor3 = Color3.fromRGB(255, 190, 80)
+			else
+				hpFill.BackgroundColor3 = Color3.fromRGB(255, 74, 74)
+			end
+			hpLabel.Text = string.format("HP: %d / %d", math.floor(health + 0.5), math.floor(maxHealth + 0.5))
+		end
+
+		local function resolveTargetModel()
+			local playerName = trimString(targetPlayerName)
+			local npcPath = trimString(targetNpcPath)
+
+			local playerResult = nil
+			if playerName ~= "" then
+				playerResult = findPlayerByNameInsensitive(playerName)
+				if playerResult then
+					if playerResult.Character then
+						return playerResult.Character, playerResult, "player"
+					end
+					return nil, playerResult, "player_wait"
+				end
+			end
+
+			if npcPath ~= "" then
+				local inst = resolveInstancePath(npcPath)
+				local model, pathPlayer = resolveModelFromInstance(inst)
+				if model or pathPlayer then
+					return model, pathPlayer, "path"
+				end
+			end
+
+			if playerResult then
+				return nil, playerResult, "player_wait"
+			end
+			return nil, nil, "none"
+		end
+
+		local function refreshResolvedTarget(forceResolve)
+			local now = os.clock()
+			local signature = trimString(targetPlayerName) .. "|" .. trimString(targetNpcPath)
+			local needsResolve = forceResolve == true
+				or signature ~= resolveSignature
+				or (not currentModel)
+				or (currentModel and not currentModel.Parent)
+				or now >= resolvePollAt
+
+			if needsResolve then
+				resolveSignature = signature
+				resolvePollAt = now + 0.25
+				currentModel, currentPlayer = nil, nil
+				local model, playerRef = resolveTargetModel()
+				currentModel = model
+				currentPlayer = playerRef
+				currentHumanoid = getHumanoidFromModel(currentModel)
+
+				if currentModel then
+					local ownerPlayer = currentPlayer or Services.Players:GetPlayerFromCharacter(currentModel)
+					local displayName = ownerPlayer and ownerPlayer.Name or tostring(currentModel.Name)
+					nameLabel.Text = tostring(displayName)
+					if ownerPlayer then
+						statusLabel.Visible = false
+						statusLabel.Text = ""
+					else
+						local targetText = trimString(targetNpcPath)
+						if targetText == "" then
+							targetText = tostring(currentModel.Name)
+						end
+						statusLabel.Text = "Target: " .. targetText
+						statusLabel.Visible = true
+					end
+				elseif currentPlayer then
+					nameLabel.Text = tostring(currentPlayer.Name)
+					statusLabel.Visible = false
+					statusLabel.Text = ""
+				else
+					nameLabel.Text = "No target"
+					statusLabel.Visible = false
+					statusLabel.Text = ""
+					clearViewport()
+				end
+			end
+
+			if currentModel and currentModel.Parent then
+				currentHumanoid = getHumanoidFromModel(currentModel)
+				applyModelPreview(currentModel)
+			else
+				clearViewport()
+			end
+			updateHealthView()
+		end
+
+		local function destroyHudSession()
+			if destroyed then
+				return
+			end
+			destroyed = true
+			if updateConnection then
+				updateConnection:Disconnect()
+				updateConnection = nil
+			end
+			clearViewport()
+			targetHudSessions[hudGui] = nil
+			if hudGui and hudGui.Parent then
+				hudGui:Destroy()
+			end
+		end
+
+		closeButton.Activated:Connect(function()
+			destroyHudSession()
+		end)
+
+		updateConnection = RunService.Heartbeat:Connect(function()
+			if destroyed then
+				return
+			end
+			refreshResolvedTarget(false)
+		end)
+		targetHudSessions[hudGui] = destroyHudSession
+		refreshResolvedTarget(true)
+
+		local TargetHudFunctions = {}
+		function TargetHudFunctions:SetPlayerName(playerName)
+			targetPlayerName = tostring(playerName or "")
+			refreshResolvedTarget(true)
+			return self
+		end
+		function TargetHudFunctions:SetNPCPath(pathText)
+			targetNpcPath = tostring(pathText or "")
+			refreshResolvedTarget(true)
+			return self
+		end
+		function TargetHudFunctions:SetTarget(playerName, pathText)
+			targetPlayerName = tostring(playerName or "")
+			targetNpcPath = tostring(pathText or "")
+			refreshResolvedTarget(true)
+			return self
+		end
+		TargetHudFunctions.SetTargetPlayer = TargetHudFunctions.SetPlayerName
+		TargetHudFunctions.SetTargetPath = TargetHudFunctions.SetNPCPath
+		function TargetHudFunctions:SetVisible(isVisible)
+			root.Visible = isVisible == true
+			return self
+		end
+		function TargetHudFunctions:GetPlayerName()
+			return targetPlayerName
+		end
+		function TargetHudFunctions:GetNPCPath()
+			return targetNpcPath
+		end
+		function TargetHudFunctions:GetTarget()
+			return currentModel
+		end
+		function TargetHudFunctions:GetTargetHumanoid()
+			return currentHumanoid
+		end
+		function TargetHudFunctions:Destroy()
+			destroyHudSession()
+			return self
+		end
+		TargetHudFunctions.Remove = TargetHudFunctions.Destroy
+		return TargetHudFunctions
+	end
+
+	function library:CreateTargetHUD(config)
+		return library:TargetHUD(config)
+	end
 
 	--delay(1, function()
 	--	library:Notify("Keybind set to ".. library.Key.Name, 20, "success")
@@ -4753,6 +5336,16 @@ function library:Init(Config)
 	end
 
 	function library:Remove()
+		local sessionsToClose = {}
+		for _, destroySession in pairs(targetHudSessions) do
+			if type(destroySession) == "function" then
+				table.insert(sessionsToClose, destroySession)
+			end
+		end
+		for _, destroySession in ipairs(sessionsToClose) do
+			pcall(destroySession)
+		end
+
 		library.AutoSaveStarted = false
 		screen:Destroy()
 		library:Panic()
@@ -4782,7 +5375,21 @@ function library:RunExample()
 
 	local rightMain = main:AddRightGroupbox("Mode")
 	rightMain:AddDropdown("Mode", { "Default", "Legit", "Rage" }, "Default", function() end)
-	rightMain:AddButton("Action", function() end)
+
+	local localPlayer = Services.Players.LocalPlayer
+	ui:CreateTargetHUD({
+		Title = "Target HUD",
+		PlayerName = localPlayer and localPlayer.Name or "",
+		Position = UDim2.new(0, 20, 0.5, -100),
+	})
+
+	rightMain:AddButton("Damage Self (-5)", function()
+		local character = localPlayer and localPlayer.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			humanoid:TakeDamage(5)
+		end
+	end)
 
 	local misc = ui:NewTab("Misc")
 	misc:AddRandomControls(3, 2)
