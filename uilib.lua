@@ -1690,6 +1690,14 @@ function library:Init(Config)
 			or UDim2.new(0.5, -(sizeValue.X.Offset // 2), 0.72, 0)
 		local targetPlayerName = tostring(config.PlayerName or config.Player or config.player or "")
 		local targetNpcPath = tostring(config.NPCPath or config.Path or config.NpcPath or config.path or "")
+		local targetInstance = nil
+		if typeof(config.TargetInstance) == "Instance" then
+			targetInstance = config.TargetInstance
+		elseif typeof(config.TargetModel) == "Instance" then
+			targetInstance = config.TargetModel
+		elseif typeof(config.Model) == "Instance" then
+			targetInstance = config.Model
+		end
 
 		local hudGui = Instance.new("ScreenGui")
 		hudGui.Name = "TargetHUD"
@@ -1952,6 +1960,13 @@ function library:Init(Config)
 			local playerName = trimString(targetPlayerName)
 			local npcPath = trimString(targetNpcPath)
 
+			if targetInstance and targetInstance.Parent then
+				local model, pathPlayer = resolveModelFromInstance(targetInstance)
+				if model or pathPlayer then
+					return model, pathPlayer, "instance"
+				end
+			end
+
 			local playerResult = nil
 			if playerName ~= "" then
 				playerResult = findPlayerByNameInsensitive(playerName)
@@ -1979,7 +1994,18 @@ function library:Init(Config)
 
 		local function refreshResolvedTarget(forceResolve)
 			local now = os.clock()
-			local signature = trimString(targetPlayerName) .. "|" .. trimString(targetNpcPath)
+			local instanceSignature = ""
+			if targetInstance and targetInstance.Parent then
+				local okFullName, fullName = pcall(function()
+					return targetInstance:GetFullName()
+				end)
+				if okFullName and type(fullName) == "string" then
+					instanceSignature = fullName
+				else
+					instanceSignature = tostring(targetInstance)
+				end
+			end
+			local signature = trimString(targetPlayerName) .. "|" .. trimString(targetNpcPath) .. "|" .. instanceSignature
 			local needsResolve = forceResolve == true
 				or signature ~= resolveSignature
 				or (not currentModel)
@@ -2004,6 +2030,9 @@ function library:Init(Config)
 						statusLabel.Text = ""
 					else
 						local targetText = trimString(targetNpcPath)
+						if targetText == "" and targetInstance and targetInstance.Parent then
+							targetText = tostring(targetInstance.Name)
+						end
 						if targetText == "" then
 							targetText = tostring(currentModel.Name)
 						end
@@ -2068,17 +2097,33 @@ function library:Init(Config)
 		end
 		function TargetHudFunctions:SetNPCPath(pathText)
 			targetNpcPath = tostring(pathText or "")
+			if targetNpcPath ~= "" then
+				targetInstance = nil
+			end
 			refreshResolvedTarget(true)
 			return self
 		end
-		function TargetHudFunctions:SetTarget(playerName, pathText)
+		function TargetHudFunctions:SetTargetInstance(inst)
+			targetInstance = (typeof(inst) == "Instance") and inst or nil
+			refreshResolvedTarget(true)
+			return self
+		end
+		function TargetHudFunctions:SetTarget(playerName, pathText, targetInst)
 			targetPlayerName = tostring(playerName or "")
 			targetNpcPath = tostring(pathText or "")
+			targetInstance = nil
+			if typeof(targetInst) == "Instance" then
+				targetInstance = targetInst
+			elseif targetNpcPath == "" then
+				targetInstance = nil
+			end
 			refreshResolvedTarget(true)
 			return self
 		end
 		TargetHudFunctions.SetTargetPlayer = TargetHudFunctions.SetPlayerName
 		TargetHudFunctions.SetTargetPath = TargetHudFunctions.SetNPCPath
+		TargetHudFunctions.SetTargetModel = TargetHudFunctions.SetTargetInstance
+		TargetHudFunctions.SetModel = TargetHudFunctions.SetTargetInstance
 		function TargetHudFunctions:SetVisible(isVisible)
 			root.Visible = isVisible == true
 			return self
@@ -2088,6 +2133,9 @@ function library:Init(Config)
 		end
 		function TargetHudFunctions:GetNPCPath()
 			return targetNpcPath
+		end
+		function TargetHudFunctions:GetTargetInstance()
+			return targetInstance
 		end
 		function TargetHudFunctions:GetTarget()
 			return currentModel
