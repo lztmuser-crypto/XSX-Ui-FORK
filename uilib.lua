@@ -212,6 +212,29 @@ RunService.RenderStepped:Connect(function(v)
 	library.fps =  math.round(1/v)
 end)
 
+local function isPointerStart(input)
+	if not input then
+		return false
+	end
+	local t = input.UserInputType
+	return t == Enum.UserInputType.MouseButton1 or t == Enum.UserInputType.Touch
+end
+
+local function isPointerMove(input)
+	if not input then
+		return false
+	end
+	local t = input.UserInputType
+	return t == Enum.UserInputType.MouseMovement or t == Enum.UserInputType.Touch
+end
+
+local function getInputX(input)
+	if input and input.Position then
+		return input.Position.X
+	end
+	return Mouse.X
+end
+
 function library:RoundNumber(int, float)
 	return tonumber(string.format("%." .. (int or 0) .. "f", float))
 end
@@ -859,7 +882,17 @@ function library:Init(Config)
 	library.ConfigFile = library.SelectedConfig
 	library:LoadDefaultTheme()
 	library.LoadedConfig = library:ReadConfig(library.ConfigFile) or {}
+	library._AutoloadApplied = false
 	library:StartAutoSave()
+	if autoloadConfig then
+		task.defer(function()
+			if library._AutoloadApplied then
+				return
+			end
+			library._AutoloadApplied = true
+			library:LoadConfig(autoloadConfig)
+		end)
+	end
 
 	local watermark = Instance.new("ScreenGui", CoreGui)
 	watermark.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
@@ -3648,7 +3681,8 @@ function library:Init(Config)
 			local sliderButtonLayout = Instance.new("UIListLayout")
 			local sliderLabel = Instance.new("TextLabel")
 			local sliderPadding = Instance.new("UIPadding")
-			local sliderValue = Instance.new("TextLabel")
+			local sliderValue = Instance.new("TextBox")
+			local sliderValueUnderline = Instance.new("Frame")
 
 			sliderFrame.Parent = page
 			sliderFrame.BackgroundColor3 = Color3.fromRGB(25,25,25)
@@ -3748,6 +3782,17 @@ function library:Init(Config)
 			sliderValue.TextColor3 = Color3.fromRGB(140, 140, 140)
 			sliderValue.TextSize = 14.000
 			sliderValue.TextXAlignment = Enum.TextXAlignment.Right
+			sliderValue.ClearTextOnFocus = false
+			sliderValue.TextEditable = true
+			sliderValue.ClipsDescendants = true
+
+			sliderValueUnderline.Parent = sliderValue
+			sliderValueUnderline.AnchorPoint = Vector2.new(0, 1)
+			sliderValueUnderline.Position = UDim2.new(0, 0, 1, 2)
+			sliderValueUnderline.Size = UDim2.new(1, 0, 0, 1)
+			sliderValueUnderline.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			sliderValueUnderline.BackgroundTransparency = 1
+			sliderValueUnderline.BorderSizePixel = 0
 
 
 			local calc1 = values.max - values.min
@@ -3762,60 +3807,56 @@ function library:Init(Config)
 			local ValueNum = quantize(values.default)
 			local slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 			sliderValue.Text = slideText
-			local function UpdateSlider()
-				TweenService:Create(sliderIndicator, TweenWrapper.Styles["slider_drag"], {Size = UDim2.new(0, math.clamp(Mouse.X - sliderIndicator.AbsolutePosition.X, 0, sliderBackground.AbsoluteSize.X), 0, 12)}):Play()
-
-				ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
-
-				local slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
-
+			local dragging = false
+			local dragInput = nil
+			local function applyFromX(x, isFinal)
+				local width = math.clamp(x - sliderBackground.AbsolutePosition.X, 0, sliderBackground.AbsoluteSize.X)
+				TweenService:Create(sliderIndicator, TweenWrapper.Styles["slider_drag"], {Size = UDim2.new(0, width, 0, 12)}):Play()
+				ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / math.max(sliderBackground.AbsoluteSize.X, 1)) * width) + tonumber(values.min))
+				slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
 				sliderValue.Text = slideText
-
 				pcall(function()
 					callback(ValueNum)
 				end)
-
-				sliderValue.Text = slideText
-
-				moveconnection = Mouse.Move:Connect(function()
-					ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
-
-					slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
-					sliderValue.Text = slideText
-
-					pcall(function()
-						callback(ValueNum)
-					end)
-
-					TweenService:Create(sliderIndicator, TweenWrapper.Styles["slider_drag"], {Size = UDim2.new(0, math.clamp(Mouse.X - sliderIndicator.AbsolutePosition.X, 0, sliderBackground.AbsoluteSize.X), 0, 12)}):Play()
-					if not UserInputService.WindowFocused then
-						moveconnection:Disconnect()
-					end
-				end)
-
-				releaseconnection = UserInputService.InputEnded:Connect(function(Mouse_2)
-					if Mouse_2.UserInputType == Enum.UserInputType.MouseButton1 then
-						ValueNum = quantize((((tonumber(values.max) - tonumber(values.min)) / sliderBackground.AbsoluteSize.X) * sliderIndicator.AbsoluteSize.X) + tonumber(values.min))
-
-						slideText = compare and formatNumber(ValueNum) .. compareSign .. tostring(values.max - 1) .. suffix or formatNumber(ValueNum) .. suffix
-						sliderValue.Text = slideText
-
-						pcall(function()
-							callback(ValueNum)
-						end)
-						if library.AutoSave then
-							library:SaveConfig()
-						end
-
-						TweenService:Create(sliderIndicator, TweenWrapper.Styles["slider_drag"], {Size = UDim2.new(0, math.clamp(Mouse.X - sliderIndicator.AbsolutePosition.X, 0, sliderBackground.AbsoluteSize.X), 0, 12)}):Play()
-						moveconnection:Disconnect()
-						releaseconnection:Disconnect()
-					end
-				end)
+				if isFinal and library.AutoSave then
+					library:SaveConfig()
+				end
 			end
-
-			sliderButton.MouseButton1Down:Connect(function()
-				UpdateSlider()
+			local function applyFromInput(input, isFinal)
+				applyFromX(getInputX(input), isFinal)
+			end
+			sliderButton.InputBegan:Connect(function(input)
+				if not isPointerStart(input) then
+					return
+				end
+				dragging = true
+				if input.UserInputType == Enum.UserInputType.Touch then
+					dragInput = input
+				else
+					dragInput = nil
+				end
+				applyFromInput(input, false)
+			end)
+			UserInputService.InputChanged:Connect(function(input)
+				if not dragging then
+					return
+				end
+				if input.UserInputType == Enum.UserInputType.MouseMovement then
+					applyFromInput(input, false)
+				elseif input.UserInputType == Enum.UserInputType.Touch and input == dragInput then
+					applyFromInput(input, false)
+				end
+			end)
+			UserInputService.InputEnded:Connect(function(input)
+				if not dragging then
+					return
+				end
+				if input.UserInputType == Enum.UserInputType.MouseButton1
+					or (input.UserInputType == Enum.UserInputType.Touch and input == dragInput) then
+					dragging = false
+					dragInput = nil
+					applyFromInput(input, true)
+				end
 			end)
 
 
@@ -3842,6 +3883,19 @@ function library:Init(Config)
 				return self
 			end
 			SliderFunctions:Set(values.default, true)
+			sliderValue.Focused:Connect(function()
+				sliderValueUnderline.BackgroundTransparency = 0.2
+				sliderValue.Text = formatNumber(ValueNum)
+			end)
+			sliderValue.FocusLost:Connect(function()
+				sliderValueUnderline.BackgroundTransparency = 1
+				local raw = tonumber(sliderValue.Text)
+				if raw == nil then
+					sliderValue.Text = slideText
+					return
+				end
+				SliderFunctions:Set(raw)
+			end)
 
 			function SliderFunctions:Max(new)
 				new = new or values.max
@@ -3988,9 +4042,16 @@ function library:Init(Config)
 
 			if type(self.AddLeftGroupbox) == "function" and type(self.AddRightGroupbox) == "function" then
 				local profiles = self:AddLeftGroupbox("Profiles")
+				local statusNote = profiles:AddNote("Active: " .. tostring(selectedConfig or "default.json"))
 				local configDropdown = profiles:AddDropdown("Config", configNames, selectedConfig or "default.json", function(choice)
 					selectedConfig = library:NormalizeConfigName(choice) or selectedConfig
 					library:SetActiveConfig(selectedConfig)
+					if configNameInput and type(configNameInput.Set) == "function" then
+						configNameInput:Set((selectedConfig or "default.json"):gsub("%.json$", ""))
+					end
+					if statusNote and type(statusNote.SetText) == "function" then
+						statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+					end
 				end)
 				local configNameInput = profiles:AddTextbox(
 					"Name",
@@ -4001,15 +4062,24 @@ function library:Init(Config)
 						if normalized then
 							selectedConfig = normalized
 							library:SetActiveConfig(selectedConfig)
+							if statusNote and type(statusNote.SetText) == "function" then
+								statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+							end
 						end
 					end
 				)
+				if configNameInput and type(configNameInput.Set) == "function" then
+					configNameInput:Set((selectedConfig or "default.json"):gsub("%.json$", ""))
+				end
 				local function syncConfigNameInput()
 					if configNameInput and type(configNameInput.GetValue) == "function" then
 						local normalized = library:NormalizeConfigName(configNameInput:GetValue())
 						if normalized then
 							selectedConfig = normalized
 							library:SetActiveConfig(selectedConfig)
+							if statusNote and type(statusNote.SetText) == "function" then
+								statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+							end
 						end
 					end
 				end
@@ -4026,6 +4096,9 @@ function library:Init(Config)
 							configDropdown:Set(selectedConfig)
 						end
 					end
+					if statusNote and type(statusNote.SetText) == "function" then
+						statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+					end
 					library:Notify(ok and ("Created " .. tostring(library.ConfigFile)) or "Create failed", 2, ok and "success" or "error")
 				end)
 				profiles:AddButton("Overwrite Config", function()
@@ -4037,6 +4110,9 @@ function library:Init(Config)
 							configDropdown:Set(selectedConfig)
 						end
 					end
+					if statusNote and type(statusNote.SetText) == "function" then
+						statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+					end
 					library:Notify(ok and ("Overwrote " .. tostring(library.ConfigFile)) or "Overwrite failed", 2, ok and "success" or "error")
 				end)
 				profiles:AddButton("Load Selected", function()
@@ -4045,10 +4121,15 @@ function library:Init(Config)
 					if ok and configDropdown and type(configDropdown.Set) == "function" then
 						configDropdown:Set(selectedConfig)
 					end
+					if statusNote and type(statusNote.SetText) == "function" then
+						statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+					end
 					library:Notify(ok and ("Loaded " .. tostring(library.ConfigFile)) or "Load failed", 2, ok and "success" or "error")
 				end)
-				local autoloadNote = profiles:AddNote("Autoload: " .. tostring(currentAutoload or "Disabled"))
-				profiles:AddButton("Set Selected As Autoload", function()
+
+				local autoloadBox = self:AddRightGroupbox("Autoload")
+				local autoloadNote = autoloadBox:AddNote("Autoload: " .. tostring(currentAutoload or "Disabled"))
+				autoloadBox:AddButton("Set Selected As Autoload", function()
 					local ok = library:SetAutoloadConfig(selectedConfig)
 					currentAutoload = ok and selectedConfig or currentAutoload
 					if autoloadNote and type(autoloadNote.SetText) == "function" then
@@ -4056,7 +4137,7 @@ function library:Init(Config)
 					end
 					library:Notify(ok and ("Autoload set: " .. tostring(selectedConfig)) or "Failed to set autoload", 2, ok and "success" or "error")
 				end)
-				profiles:AddButton("Disable Autoload", function()
+				autoloadBox:AddButton("Disable Autoload", function()
 					local ok = library:DisableAutoloadConfig()
 					if ok then
 						currentAutoload = nil
@@ -4094,15 +4175,22 @@ function library:Init(Config)
 
 			-- Fallback single-column config controls.
 			self:NewSection("Config Profiles")
+			local statusNote = self:NewNote("Active: " .. tostring(selectedConfig or "default.json"))
 			local configDropdown = self:NewDropdown("Config", selectedConfig or "default.json", configNames, function(choice)
 				selectedConfig = library:NormalizeConfigName(choice) or selectedConfig
 				library:SetActiveConfig(selectedConfig)
+				if statusNote and type(statusNote.SetText) == "function" then
+					statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+				end
 			end)
 			self:NewTextbox("Config Name", (selectedConfig or "default.json"):gsub("%.json$", ""), "new_profile", "small", true, false, function(textValue)
 				local normalized = library:NormalizeConfigName(textValue)
 				if normalized then
 					selectedConfig = normalized
 					library:SetActiveConfig(selectedConfig)
+					if statusNote and type(statusNote.SetText) == "function" then
+						statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+					end
 				end
 			end)
 			self:NewButton("Create New", function()
@@ -4117,6 +4205,9 @@ function library:Init(Config)
 						configDropdown:Set(selectedConfig)
 					end
 				end
+				if statusNote and type(statusNote.SetText) == "function" then
+					statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+				end
 				library:Notify(ok and ("Created " .. tostring(library.ConfigFile)) or "Create failed", 2, ok and "success" or "error")
 			end)
 			self:NewButton("Overwrite Config", function()
@@ -4127,12 +4218,19 @@ function library:Init(Config)
 						configDropdown:Set(selectedConfig)
 					end
 				end
+				if statusNote and type(statusNote.SetText) == "function" then
+					statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+				end
 				library:Notify(ok and ("Overwrote " .. tostring(library.ConfigFile)) or "Overwrite failed", 2, ok and "success" or "error")
 			end)
 			self:NewButton("Load Selected", function()
 				local ok = library:LoadConfig(selectedConfig)
+				if statusNote and type(statusNote.SetText) == "function" then
+					statusNote:SetText("Active: " .. tostring(selectedConfig or "default.json"))
+				end
 				library:Notify(ok and ("Loaded " .. tostring(library.ConfigFile)) or "Load failed", 2, ok and "success" or "error")
 			end)
+			self:NewSection("Autoload")
 			local autoloadNote = self:NewNote("Autoload: " .. tostring(currentAutoload or "Disabled"))
 			self:NewButton("Set Selected As Autoload", function()
 				local ok = library:SetAutoloadConfig(selectedConfig)
@@ -4526,7 +4624,8 @@ function library:Init(Config)
 				label.TextSize = 13
 				label.TextXAlignment = Enum.TextXAlignment.Left
 
-				local valueLabel = Instance.new("TextLabel")
+				local valueLabel = Instance.new("TextBox")
+				local valueUnderline = Instance.new("Frame")
 				valueLabel.Parent = label
 				valueLabel.BackgroundTransparency = 1
 				valueLabel.AnchorPoint = Vector2.new(1, 0)
@@ -4536,6 +4635,17 @@ function library:Init(Config)
 				valueLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
 				valueLabel.TextSize = 12
 				valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+				valueLabel.ClearTextOnFocus = false
+				valueLabel.TextEditable = true
+				valueLabel.ClipsDescendants = true
+
+				valueUnderline.Parent = valueLabel
+				valueUnderline.AnchorPoint = Vector2.new(0, 1)
+				valueUnderline.Position = UDim2.new(0, 0, 1, 2)
+				valueUnderline.Size = UDim2.new(1, 0, 0, 1)
+				valueUnderline.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+				valueUnderline.BackgroundTransparency = 1
+				valueUnderline.BorderSizePixel = 0
 
 				local bar = Instance.new("TextButton")
 				bar.Parent = row
@@ -4582,21 +4692,56 @@ function library:Init(Config)
 					return SliderFunctions
 				end
 
-				local dragging = false
-				bar.InputBegan:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 then
-						dragging = true
-					end
+				valueLabel.Focused:Connect(function()
+					valueUnderline.BackgroundTransparency = 0.2
+					valueLabel.Text = formatValue(value)
 				end)
-				bar.InputEnded:Connect(function(input)
-					if input.UserInputType == Enum.UserInputType.MouseButton1 then
-						dragging = false
+				valueLabel.FocusLost:Connect(function()
+					valueUnderline.BackgroundTransparency = 1
+					local raw = tonumber(valueLabel.Text)
+					if raw == nil then
+						valueLabel.Text = formatValue(value)
+						return
 					end
+					SliderFunctions:Set(raw)
+				end)
+
+				local dragging = false
+				local dragInput = nil
+				local function updateFromInput(input)
+					local alpha = (getInputX(input) - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1)
+					SliderFunctions:Set(minV + (maxV - minV) * math.clamp(alpha, 0, 1))
+				end
+				bar.InputBegan:Connect(function(input)
+					if not isPointerStart(input) then
+						return
+					end
+					dragging = true
+					if input.UserInputType == Enum.UserInputType.Touch then
+						dragInput = input
+					else
+						dragInput = nil
+					end
+					updateFromInput(input)
 				end)
 				UserInputService.InputChanged:Connect(function(input)
-					if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-						local alpha = (Mouse.X - bar.AbsolutePosition.X) / math.max(bar.AbsoluteSize.X, 1)
-						SliderFunctions:Set(minV + (maxV - minV) * math.clamp(alpha, 0, 1))
+					if not dragging then
+						return
+					end
+					if input.UserInputType == Enum.UserInputType.MouseMovement then
+						updateFromInput(input)
+					elseif input.UserInputType == Enum.UserInputType.Touch and input == dragInput then
+						updateFromInput(input)
+					end
+				end)
+				UserInputService.InputEnded:Connect(function(input)
+					if not dragging then
+						return
+					end
+					if input.UserInputType == Enum.UserInputType.MouseButton1
+						or (input.UserInputType == Enum.UserInputType.Touch and input == dragInput) then
+						dragging = false
+						dragInput = nil
 					end
 				end)
 
